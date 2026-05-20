@@ -1,0 +1,21 @@
+{
+  "name": "file_compare_tool",
+  "version": "1.0.0",
+  "description": "批量文件修改对比与自动修改工具",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "diff": "^7.0.0",
+    "express": "^4.21.2",
+    "jszip": "^3.10.1",
+    "mammoth": "^1.9.0",
+    "multer": "^1.4.5-lts.1",
+    "pdf-parse": "^1.1.1"
+  }
+}
