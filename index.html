@@ -26,26 +26,35 @@
         <p id="originName" class="text-xs text-slate-500 mt-2 truncate"></p>
       </div>
 
-      <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
-        <label class="block text-sm font-semibold text-slate-700 mb-2">2. 修改后模板 (Template)</label>
-        <p class="text-xs text-slate-400 mb-2">与原始文件同格式对比</p>
-        <input type="file" id="templateFile" accept=".txt,.docx,.doc,.pdf"
-          class="block w-full text-sm text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100" />
-        <p id="templateName" class="text-xs text-slate-500 mt-2 truncate"></p>
+      <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 flex flex-col">
+        <div class="flex-1 min-h-0">
+          <label class="block text-sm font-semibold text-slate-700 mb-2">2. 修改后模板 (Template)</label>
+          <p class="text-xs text-slate-400 mb-2">与原始文件同格式对比</p>
+          <input type="file" id="templateFile" accept=".txt,.docx,.doc,.pdf"
+            class="block w-full text-sm text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100" />
+          <p id="templateName" class="text-xs text-slate-500 mt-2 truncate"></p>
+        </div>
+        <button id="startBtn" type="button" onclick="startCompareAndAnalyze()"
+          class="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 rounded-lg transition shrink-0">
+          开始对比与分析
+        </button>
       </div>
 
       <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 flex flex-col">
         <label class="block text-sm font-semibold text-slate-700 mb-2">3. 批量文件 / 文件夹</label>
-        <p class="text-xs text-slate-400 mb-2">多选文件，或选择整个文件夹</p>
-        <input type="file" id="batchFiles" multiple accept=".txt,.docx,.doc,.pdf"
+        <p class="text-xs text-slate-400 mb-2">
+          可多次点击「选择文件」逐次累加；支持一次多选（⌘/Ctrl）；亦可选择整个文件夹，自动加入其中符合格式的文件。仅处理 txt / docx / doc / pdf。
+        </p>
+        <!-- 不在多选 input 上使用 accept：部分浏览器在 multiple + accept 组合下无法稳定多选；类型由脚本过滤 -->
+        <input type="file" id="batchFiles" name="batchFiles" multiple
           class="block w-full text-sm text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-violet-50 file:text-violet-700 hover:file:bg-violet-100 mb-2" />
-        <input type="file" id="batchFolder" webkitdirectory directory multiple
+        <input type="file" id="batchFolder" name="batchFolder" webkitdirectory directory multiple
           class="block w-full text-sm text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-violet-50 file:text-violet-600 hover:file:bg-violet-100" />
         <p id="batchCount" class="text-xs text-slate-500 mt-2"></p>
-        <button id="startBtn" onclick="startCompareAndAnalyze()"
-          class="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 rounded-lg transition">
-          开始对比与分析
-        </button>
+        <p id="batchMergeHint" class="text-xs text-amber-600 mt-1 min-h-[1rem]"></p>
+        <div id="batchFileList"
+          class="mt-2 max-h-44 overflow-y-auto rounded-lg border border-violet-100 bg-slate-50/90 p-2 space-y-1 text-xs min-h-[2.5rem]">
+        </div>
       </div>
     </section>
 
@@ -98,7 +107,116 @@
     let globalReplacements = [];
     let globalAnalysisTasks = [];
 
+    /**
+     * 批量待遍历文件：内存累加列表（多次点选「选择文件」或选文件夹都会并入，不会覆盖）
+     * 每项 { id: string, file: File }
+     */
+    let batchFileEntries = [];
+    let batchFileIdSeq = 1;
+
     const ACCEPT_EXT = ['.txt', '.docx', '.doc', '.pdf'];
+
+    /** 去重键：文件夹内带 webkitRelativePath，普通多选仅有 name */
+    function fileDedupeKey(file) {
+      const rel = file.webkitRelativePath || '';
+      return `${rel}|${file.name}|${file.size}|${file.lastModified}`;
+    }
+
+    function isSupportedFileName(name) {
+      const n = name.toLowerCase();
+      return ACCEPT_EXT.some((ext) => n.endsWith(ext));
+    }
+
+    function mergeBatchFilesFromList(fileList) {
+      if (!fileList?.length) return;
+
+      const arr = Array.from(fileList);
+      const seenKeys = new Set(batchFileEntries.map((e) => fileDedupeKey(e.file)));
+      let added = 0;
+      let skippedFmt = 0;
+
+      for (const f of arr) {
+        if (!isSupportedFileName(f.name)) {
+          skippedFmt++;
+          continue;
+        }
+        const k = fileDedupeKey(f);
+        if (seenKeys.has(k)) continue;
+        seenKeys.add(k);
+        batchFileEntries.push({
+          id: `bf-${batchFileIdSeq++}`,
+          file: f,
+        });
+        added++;
+      }
+
+      renderBatchFileList();
+
+      const hintEl = document.getElementById('batchMergeHint');
+      if (hintEl) {
+        if (added === 0 && arr.length) {
+          hintEl.textContent =
+            skippedFmt === arr.length
+              ? '本次选择无支持格式（txt / docx / doc / pdf）'
+              : '本次无新增：文件均已在列表中';
+        } else {
+          hintEl.textContent = '';
+        }
+      }
+    }
+
+    function removeBatchFile(id) {
+      batchFileEntries = batchFileEntries.filter((e) => e.id !== id);
+      const hintEl = document.getElementById('batchMergeHint');
+      if (hintEl) hintEl.textContent = '';
+      renderBatchFileList();
+    }
+
+    function renderBatchFileList() {
+      const listEl = document.getElementById('batchFileList');
+      const countEl = document.getElementById('batchCount');
+
+      if (batchFileEntries.length) {
+        countEl.textContent = `已添加 ${batchFileEntries.length} 个文件（可继续选择文件或文件夹累加）`;
+      } else {
+        countEl.textContent = '';
+      }
+
+      listEl.innerHTML = '';
+
+      if (!batchFileEntries.length) {
+        const empty = document.createElement('p');
+        empty.className = 'text-slate-400 text-center py-3';
+        empty.textContent = '暂无已选批量文件';
+        listEl.appendChild(empty);
+        return;
+      }
+
+      batchFileEntries.forEach((entry) => {
+        const f = entry.file;
+        const displayName = f.webkitRelativePath || f.name;
+
+        const row = document.createElement('div');
+        row.className =
+          'flex items-center justify-between gap-2 rounded-md border border-violet-100 bg-white px-2 py-1.5 shadow-sm';
+
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'truncate flex-1 text-slate-700 min-w-0';
+        nameSpan.title = displayName;
+        nameSpan.textContent = displayName;
+
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.className =
+          'shrink-0 rounded px-2 py-0.5 text-xs font-medium text-red-600 hover:bg-red-50 hover:text-red-800';
+        delBtn.textContent = '移除';
+        delBtn.addEventListener('click', () => removeBatchFile(entry.id));
+
+        row.appendChild(nameSpan);
+        row.appendChild(delBtn);
+        listEl.appendChild(row);
+      });
+    }
 
     function escapeHtml(str) {
       const d = document.createElement('div');
@@ -109,8 +227,7 @@
     function filterSupportedFiles(fileList) {
       const out = [];
       for (const f of fileList) {
-        const name = f.name.toLowerCase();
-        if (ACCEPT_EXT.some((ext) => name.endsWith(ext))) out.push(f);
+        if (isSupportedFileName(f.name)) out.push(f);
       }
       return out;
     }
@@ -122,28 +239,20 @@
       document.getElementById('templateFile').addEventListener('change', (e) => {
         document.getElementById('templateName').textContent = e.target.files[0]?.name || '';
       });
-      const updateBatch = () => {
-        const files = getBatchFileList();
-        document.getElementById('batchCount').textContent = files.length
-          ? `已选 ${files.length} 个支持的文件`
-          : '';
-      };
-      document.getElementById('batchFiles').addEventListener('change', () => {
-        document.getElementById('batchFolder').value = '';
-        updateBatch();
+
+      document.getElementById('batchFiles').addEventListener('change', (e) => {
+        mergeBatchFilesFromList(e.target.files);
+        e.target.value = '';
       });
-      document.getElementById('batchFolder').addEventListener('change', () => {
-        document.getElementById('batchFiles').value = '';
-        updateBatch();
+      document.getElementById('batchFolder').addEventListener('change', (e) => {
+        mergeBatchFilesFromList(e.target.files);
+        e.target.value = '';
       });
     }
 
-    /** 合并「多文件」与「文件夹」两种选择 */
+    /** 当前已累加的批量文件（供分析与上传） */
     function getBatchFileList() {
-      const multi = document.getElementById('batchFiles').files;
-      const folder = document.getElementById('batchFolder').files;
-      const raw = folder?.length ? folder : multi;
-      return filterSupportedFiles(raw);
+      return batchFileEntries.map((e) => e.file);
     }
 
     function setLoading(el, msg) {
@@ -398,6 +507,7 @@
     }
 
     bindFileLabels();
+    renderBatchFileList();
   </script>
 </body>
 </html>
