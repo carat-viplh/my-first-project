@@ -1,3 +1,6 @@
 node_modules/
 uploads/
 .DS_Store
+
+# 个人/本机编辑器配置（代理等），勿提交以免影响其他开发者
+.vscode/settings.json
