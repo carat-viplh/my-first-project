@@ -17,14 +17,31 @@ const PORT = 3000;
 
 const SUPPORTED_EXT = new Set(['.txt', '.docx', '.doc', '.pdf']);
 
-// ---------- 初始化 ----------
-app.use(express.json({ limit: '50mb' }));
-app.use(express.static('.'));
+/**
+ * 修正上传文件名乱码：multipart 中 filename 常被按 latin1 解析，浏览器实际为 UTF-8。
+ * 若字符串已含中日韩等字符则视为已是合法 UTF-8，不再转换。
+ */
+function normalizeUploadFilename(name) {
+  if (name == null || typeof name !== 'string') return name ?? '';
+  if (/[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/.test(name)) {
+    return name;
+  }
+  try {
+    const utf8 = Buffer.from(name, 'latin1').toString('utf8');
+    if (/[\u4e00-\u9fff]/.test(utf8)) {
+      return utf8;
+    }
+  } catch {
+    /* ignore */
+  }
+  return name;
+}
 
 const storage = multer.diskStorage({
   destination: UPLOAD_DIR,
   filename: (_req, file, cb) => {
-    const safe = file.originalname.replace(/[^\w.\-()\u4e00-\u9fa5]/g, '_');
+    const orig = normalizeUploadFilename(file.originalname);
+    const safe = orig.replace(/[^\w.\-()\u4e00-\u9fa5]/g, '_');
     cb(null, `${Date.now()}-${safe}`);
   },
 });
@@ -32,6 +49,10 @@ const upload = multer({
   storage,
   limits: { fileSize: 30 * 1024 * 1024 },
 });
+
+// ---------- 初始化 ----------
+app.use(express.json({ limit: '50mb' }));
+app.use(express.static('.'));
 
 (async () => {
   try {
@@ -349,9 +370,9 @@ app.post(
       }
 
       originPath = req.files.originFile[0].path;
-      const originName = req.files.originFile[0].originalname;
+      const originName = normalizeUploadFilename(req.files.originFile[0].originalname);
       templatePath = req.files.templateFile[0].path;
-      const templateName = req.files.templateFile[0].originalname;
+      const templateName = normalizeUploadFilename(req.files.templateFile[0].originalname);
 
       const originText = await extractText(originPath, originName);
       const templateText = await extractText(templatePath, templateName);
@@ -398,8 +419,9 @@ app.post('/api/analyze-batch', upload.array('batchFiles', 200), async (req, res)
 
     const results = [];
     for (const file of req.files) {
-      const fileText = await extractText(file.path, file.originalname);
-      results.push(analyzeOneFile(file.originalname, file.path, fileText, replacements));
+      const displayName = normalizeUploadFilename(file.originalname);
+      const fileText = await extractText(file.path, displayName);
+      results.push(analyzeOneFile(displayName, file.path, fileText, replacements));
     }
 
     res.json({ success: true, results });

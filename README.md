@@ -15,7 +15,7 @@ npm start
 ## 使用步骤
 
 1. 上传 **原始文件** 与 **修改后模板文件**（txt / docx / pdf；doc 请另存为 docx）
-2. 上传 **批量文件** 或选择 **整个文件夹**
+2. 添加 **批量文件**（可多次选择、多选累加，列表中可单独移除）
 3. 点击「开始对比与分析」查看差异行号与批量扫描结果
 4. 点击「一键批量自动修改」写回 txt / docx，并下载修改后的文件
 
@@ -32,4 +32,3 @@ npm start
 
 - 前端：HTML + Tailwind CSS + 原生 JavaScript
 - 后端：Node.js + Express + multer + diff + mammoth + pdf-parse + jszip
-# my-first-project

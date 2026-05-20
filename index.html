@@ -41,15 +41,13 @@
       </div>
 
       <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 flex flex-col">
-        <label class="block text-sm font-semibold text-slate-700 mb-2">3. 批量文件 / 文件夹</label>
+        <label class="block text-sm font-semibold text-slate-700 mb-2">3. 批量文件</label>
         <p class="text-xs text-slate-400 mb-2">
-          可多次点击「选择文件」逐次累加；支持一次多选（⌘/Ctrl）；亦可选择整个文件夹，自动加入其中符合格式的文件。仅处理 txt / docx / doc / pdf。
+          可多次点击「选择文件」逐次累加；支持一次多选（⌘/Ctrl）。仅处理 txt / docx / doc / pdf。
         </p>
         <!-- 不在多选 input 上使用 accept：部分浏览器在 multiple + accept 组合下无法稳定多选；类型由脚本过滤 -->
         <input type="file" id="batchFiles" name="batchFiles" multiple
-          class="block w-full text-sm text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-violet-50 file:text-violet-700 hover:file:bg-violet-100 mb-2" />
-        <input type="file" id="batchFolder" name="batchFolder" webkitdirectory directory multiple
-          class="block w-full text-sm text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-violet-50 file:text-violet-600 hover:file:bg-violet-100" />
+          class="block w-full text-sm text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-violet-50 file:text-violet-700 hover:file:bg-violet-100" />
         <p id="batchCount" class="text-xs text-slate-500 mt-2"></p>
         <p id="batchMergeHint" class="text-xs text-amber-600 mt-1 min-h-[1rem]"></p>
         <div id="batchFileList"
@@ -108,7 +106,7 @@
     let globalAnalysisTasks = [];
 
     /**
-     * 批量待遍历文件：内存累加列表（多次点选「选择文件」或选文件夹都会并入，不会覆盖）
+     * 批量待遍历文件：内存累加列表（多次点选「选择文件」并入，不会覆盖）
      * 每项 { id: string, file: File }
      */
     let batchFileEntries = [];
@@ -116,7 +114,7 @@
 
     const ACCEPT_EXT = ['.txt', '.docx', '.doc', '.pdf'];
 
-    /** 去重键：文件夹内带 webkitRelativePath，普通多选仅有 name */
+    /** 去重键：若有 webkitRelativePath 则一并参与区分（如自解压等场景） */
     function fileDedupeKey(file) {
       const rel = file.webkitRelativePath || '';
       return `${rel}|${file.name}|${file.size}|${file.lastModified}`;
@@ -177,7 +175,7 @@
       const countEl = document.getElementById('batchCount');
 
       if (batchFileEntries.length) {
-        countEl.textContent = `已添加 ${batchFileEntries.length} 个文件（可继续选择文件或文件夹累加）`;
+        countEl.textContent = `已添加 ${batchFileEntries.length} 个文件（可继续选择累加）`;
       } else {
         countEl.textContent = '';
       }
@@ -244,10 +242,6 @@
         mergeBatchFilesFromList(e.target.files);
         e.target.value = '';
       });
-      document.getElementById('batchFolder').addEventListener('change', (e) => {
-        mergeBatchFilesFromList(e.target.files);
-        e.target.value = '';
-      });
     }
 
     /** 当前已累加的批量文件（供分析与上传） */
@@ -300,7 +294,7 @@
         if (batchList.length > 0) {
           await analyzeBatchFiles(batchList);
         } else {
-          batchDiv.innerHTML = '<p class="text-amber-600 text-sm">模板对比完成。请上传批量文件或文件夹以执行遍历。</p>';
+          batchDiv.innerHTML = '<p class="text-amber-600 text-sm">模板对比完成。请在上方添加批量文件以执行遍历。</p>';
         }
       } catch (err) {
         diffDiv.innerHTML = `<p class="text-red-400">请求失败：${escapeHtml(err.message)}</p>`;
@@ -387,39 +381,83 @@
 
       let needFixCount = 0;
 
-      results.forEach((task) => {
+      results.forEach((task, idx) => {
         const card = document.createElement('div');
         const fixable = task.canAutoFix;
         card.className = `p-3 rounded-lg border text-sm ${
           task.needFix ? 'border-amber-300 bg-amber-50' : 'border-slate-200 bg-slate-50'
         }`;
+        card.dataset.taskIndex = String(idx);
 
-        let html = `<div class="flex justify-between items-start gap-2">` +
-          `<span class="font-medium break-all">📄 ${escapeHtml(task.filename)}</span>`;
+        const header = document.createElement('div');
+        header.className = 'flex justify-between items-start gap-2 flex-wrap';
+
+        const title = document.createElement('span');
+        title.className = 'font-medium break-all flex-1 min-w-0';
+        title.textContent = '📄 ' + task.filename;
+
+        header.appendChild(title);
+
+        const actions = document.createElement('div');
+        actions.className = 'flex items-center gap-2 shrink-0';
 
         if (task.needFix) {
           needFixCount++;
-          html += `<span class="text-amber-700 font-semibold shrink-0">需修改</span></div>`;
-          if (!fixable) {
-            html += `<p class="text-xs text-orange-600 mt-1">该格式仅可扫描，请转为 txt/docx 后自动写回</p>`;
+
+          if (task._appliedFix) {
+            const done = document.createElement('span');
+            done.className = 'text-emerald-700 font-semibold text-xs';
+            done.textContent = '已修改';
+            actions.appendChild(done);
+          } else {
+            const badge = document.createElement('span');
+            badge.className = 'text-amber-700 font-semibold text-xs';
+            badge.textContent = '需修改';
+            actions.appendChild(badge);
+
+            if (fixable) {
+              const singleBtn = document.createElement('button');
+              singleBtn.type = 'button';
+              singleBtn.className =
+                'rounded-md px-2.5 py-1 text-xs font-medium bg-amber-600 text-white hover:bg-amber-700 shadow-sm transition';
+              singleBtn.textContent = '单独修改';
+              singleBtn.addEventListener('click', () => applySingleFileFix(idx));
+              actions.appendChild(singleBtn);
+            }
           }
+
+          header.appendChild(actions);
+          card.appendChild(header);
+
+          if (!fixable) {
+            const tip = document.createElement('p');
+            tip.className = 'text-xs text-orange-600 mt-1';
+            tip.textContent = '该格式仅可扫描，请转为 txt/docx 后自动写回';
+            card.appendChild(tip);
+          }
+
           task.details.forEach((d) => {
-            html +=
-              `<div class="mt-2 pl-3 border-l-2 border-amber-300 text-xs text-slate-600">` +
+            const block = document.createElement('div');
+            block.className = 'mt-2 pl-3 border-l-2 border-amber-300 text-xs text-slate-600';
+            block.innerHTML =
               `<div>第 <b class="text-blue-700">${d.line}</b> 行</div>` +
               `<div class="mt-1"><span class="text-red-600">旧：</span><code class="bg-red-100 px-1 rounded">${escapeHtml(d.oldText)}</code></div>` +
-              `<div class="mt-1"><span class="text-green-600">新：</span><code class="bg-green-100 px-1 rounded">${escapeHtml(d.newText)}</code></div>` +
-              `</div>`;
+              `<div class="mt-1"><span class="text-green-600">新：</span><code class="bg-green-100 px-1 rounded">${escapeHtml(d.newText)}</code></div>`;
+            card.appendChild(block);
           });
         } else {
-          html += `<span class="text-emerald-600 shrink-0">无需修改</span></div>`;
+          const ok = document.createElement('span');
+          ok.className = 'text-emerald-600 shrink-0 text-xs font-medium';
+          ok.textContent = '无需修改';
+          actions.appendChild(ok);
+          header.appendChild(actions);
+          card.appendChild(header);
         }
 
-        card.innerHTML = html;
         batchDiv.appendChild(card);
       });
 
-      const fixableTasks = results.filter((t) => t.needFix && t.canAutoFix);
+      const fixableTasks = results.filter((t) => t.needFix && t.canAutoFix && !t._appliedFix);
       const fixBtn = document.getElementById('fixBtn');
 
       if (fixableTasks.length > 0) {
@@ -428,11 +466,53 @@
         fixBtn.className =
           'w-full mt-4 bg-amber-500 hover:bg-amber-600 text-white font-medium py-3 rounded-lg shadow cursor-pointer transition';
       } else if (needFixCount > 0) {
-        fixBtn.disabled = true;
-        fixBtn.textContent = '当前待改文件不支持自动写回';
-        fixBtn.className = 'w-full mt-4 bg-slate-300 text-white font-medium py-3 rounded-lg cursor-not-allowed';
+        const anyPending = results.some((t) => t.needFix && t.canAutoFix && !t._appliedFix);
+        if (!anyPending && results.some((t) => t.needFix && t.canAutoFix && t._appliedFix)) {
+          fixBtn.disabled = true;
+          fixBtn.textContent = '可修改文件均已处理';
+          fixBtn.className = 'w-full mt-4 bg-slate-300 text-white font-medium py-3 rounded-lg cursor-not-allowed';
+        } else {
+          fixBtn.disabled = true;
+          fixBtn.textContent = '当前待改文件不支持自动写回';
+          fixBtn.className = 'w-full mt-4 bg-slate-300 text-white font-medium py-3 rounded-lg cursor-not-allowed';
+        }
       } else {
         resetFixButton();
+      }
+    }
+
+    /** 仅修改列表中的某一个文件 */
+    async function applySingleFileFix(idx) {
+      const task = globalAnalysisTasks[idx];
+      if (!task?.needFix || !task.canAutoFix || task._appliedFix) return;
+      if (!confirm(`确定仅修改「${task.filename}」？建议先备份原文件。`)) return;
+
+      try {
+        const res = await fetch('/api/apply-fix', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fileTasks: [task] }),
+        });
+        const result = await res.json();
+
+        if (!result.success) {
+          alert('修改失败：' + result.error);
+          return;
+        }
+
+        if (result.skipped?.length) {
+          alert(
+            `${result.skipped[0].filename || ''}：${result.skipped[0].reason || '跳过'}`
+          );
+          return;
+        }
+
+        task._appliedFix = true;
+        appendDownloadLinks(result.fixed || []);
+        renderBatchResults(globalAnalysisTasks);
+        alert(result.message || '该文件已修改');
+      } catch (err) {
+        alert('请求失败：' + err.message);
       }
     }
 
@@ -445,7 +525,7 @@
 
     /** 一键自动修改 */
     async function executeAutoFix() {
-      const tasks = globalAnalysisTasks.filter((t) => t.needFix && t.canAutoFix);
+      const tasks = globalAnalysisTasks.filter((t) => t.needFix && t.canAutoFix && !t._appliedFix);
       if (!tasks.length) {
         alert('没有可自动修改的文件');
         return;
@@ -488,6 +568,29 @@
       }
     }
 
+    /** 在下载区追加链接（单独修改时不清空已有链接） */
+    function appendDownloadLinks(fixedFiles) {
+      const area = document.getElementById('downloadArea');
+      if (!fixedFiles.length) return;
+      area.classList.remove('hidden');
+      let title = area.querySelector('[data-download-title]');
+      if (!title) {
+        title = document.createElement('p');
+        title.setAttribute('data-download-title', '1');
+        title.className = 'text-sm font-medium text-slate-700';
+        title.textContent = '下载已修改文件：';
+        area.insertBefore(title, area.firstChild);
+      }
+      fixedFiles.forEach((f) => {
+        const a = document.createElement('a');
+        a.href = `/api/download/${encodeURIComponent(f.storedName)}`;
+        a.download = f.filename;
+        a.className = 'block text-sm text-blue-600 hover:underline';
+        a.textContent = '⬇ ' + f.filename;
+        area.appendChild(a);
+      });
+    }
+
     function showDownloadLinks(fixedFiles) {
       const area = document.getElementById('downloadArea');
       if (!fixedFiles.length) {
@@ -495,7 +598,7 @@
         return;
       }
       area.classList.remove('hidden');
-      area.innerHTML = '<p class="text-sm font-medium text-slate-700">下载已修改文件：</p>';
+      area.innerHTML = '<p class="text-sm font-medium text-slate-700" data-download-title="1">下载已修改文件：</p>';
       fixedFiles.forEach((f) => {
         const a = document.createElement('a');
         a.href = `/api/download/${encodeURIComponent(f.storedName)}`;
