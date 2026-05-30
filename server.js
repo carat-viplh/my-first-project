@@ -5,15 +5,30 @@
 import express from 'express';
 import multer from 'multer';
 import path from 'path';
+import { fileURLToPath } from 'url';
+import { mkdirSync } from 'fs';
 import fs from 'fs/promises';
 import mammoth from 'mammoth';
 import pdfParse from 'pdf-parse';
 import * as diffLib from 'diff';
 import JSZip from 'jszip';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+/** Vercel Serverless 环境：不可 listen；仅 /tmp 可写 */
+const IS_VERCEL = Boolean(process.env.VERCEL);
+const UPLOAD_DIR = IS_VERCEL
+  ? '/tmp/file_compare_uploads'
+  : path.join(__dirname, 'uploads');
+const PORT = Number(process.env.PORT) || 3000;
+
 const app = express();
-const UPLOAD_DIR = 'uploads';
-const PORT = 3000;
+
+try {
+  mkdirSync(UPLOAD_DIR, { recursive: true });
+} catch (err) {
+  console.error('无法创建上传目录:', err);
+}
 
 const SUPPORTED_EXT = new Set(['.txt', '.docx', '.doc', '.pdf']);
 
@@ -52,15 +67,8 @@ const upload = multer({
 
 // ---------- 初始化 ----------
 app.use(express.json({ limit: '50mb' }));
-app.use(express.static('.'));
-
-(async () => {
-  try {
-    await fs.access(UPLOAD_DIR);
-  } catch {
-    await fs.mkdir(UPLOAD_DIR, { recursive: true });
-  }
-})();
+// 与 server.js 同目录的静态资源（本地与 Vercel 捆绑目录一致）
+app.use(express.static(__dirname));
 
 // ---------- 1. 文件解析：提取纯文本 ----------
 /**
@@ -82,9 +90,13 @@ async function extractText(filePath, originalName) {
     throw new Error('旧版 .doc 请先另存为 .docx 后再上传');
   }
   if (ext === '.pdf') {
-    const buffer = await fs.readFile(filePath);
-    const data = await pdfParse(buffer);
-    return data.text || '';
+    try {
+      const buffer = await fs.readFile(filePath);
+      const data = await pdfParse(buffer);
+      return data.text || '';
+    } catch (err) {
+      throw new Error(`PDF 解析失败: ${err.message}`);
+    }
   }
   throw new Error(`无法解析: ${ext}`);
 }
@@ -489,6 +501,11 @@ app.get('/api/download/:storedName', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`✅ 批量文件对比工具已启动: http://localhost:${PORT}`);
-});
+// 本地/传统 Node：直接启动；Vercel 由平台调用导出的 app，不能 listen
+if (!IS_VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`✅ 批量文件对比工具已启动: http://localhost:${PORT}`);
+  });
+}
+
+export default app;

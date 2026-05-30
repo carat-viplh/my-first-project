@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>表格数据聚合工具</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="./xlsx.full.min.js"></script>
+  <script src="./jszip.min.js"></script>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen">
+
+  <div class="max-w-7xl mx-auto p-4 md:p-8">
+    <header class="mb-8">
+      <h1 class="text-2xl md:text-3xl font-bold text-emerald-700">表格数据聚合工具</h1>
+      <p class="text-slate-500 text-sm mt-2">上传 Excel / CSV，按周 / 月 / 季 / 年周期聚合前两列维度数据，纯前端处理，无需后端。</p>
+    </header>
+
+    <div id="alertBox" class="hidden mb-4 rounded-lg border px-4 py-3 text-sm"></div>
+
+    <!-- 1. 文件上传 -->
+    <section class="bg-white rounded-xl border border-slate-200 shadow-sm p-5 mb-6">
+      <h2 class="text-lg font-semibold text-slate-700 mb-3">1. 上传表格</h2>
+      <p class="text-xs text-slate-400 mb-3">支持 .xlsx / .csv。前两列为维度列（如店铺、统计项），第三列起为日期列（表头如「3月15号」）。</p>
+      <input type="file" id="fileInput" accept=".xlsx,.xls,.csv"
+        class="block w-full text-sm text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100" />
+      <div id="fileMeta" class="mt-3 text-xs text-slate-500"></div>
+    </section>
+
+    <!-- 2. 配置区 -->
+    <section id="configSection" class="hidden bg-white rounded-xl border border-slate-200 shadow-sm p-5 mb-6">
+      <h2 class="text-lg font-semibold text-slate-700 mb-4">2. 聚合配置</h2>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-2">聚合维度</label>
+          <div class="space-y-2">
+            <label class="flex items-center gap-2 text-sm"><input type="radio" name="period" value="7" checked class="text-emerald-600" /> 周维度（7 天）</label>
+            <label class="flex items-center gap-2 text-sm"><input type="radio" name="period" value="28" class="text-emerald-600" /> 月维度（28 天）</label>
+            <label class="flex items-center gap-2 text-sm"><input type="radio" name="period" value="91" class="text-emerald-600" /> 季度维度（91 天）</label>
+            <label class="flex items-center gap-2 text-sm"><input type="radio" name="period" value="365" class="text-emerald-600" /> 年维度（365 天）</label>
+          </div>
+        </div>
+
+        <div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label for="startDate" class="block text-sm font-medium text-slate-700 mb-2">统计起始日期</label>
+              <input type="date" id="startDate"
+                class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+            </div>
+            <div>
+              <label for="endDate" class="block text-sm font-medium text-slate-700 mb-2">
+                统计结束日期 <span class="text-slate-400 font-normal">（可选）</span>
+              </label>
+              <input type="date" id="endDate"
+                class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+            </div>
+          </div>
+          <p class="text-xs text-slate-400 mt-2">以起始日期为起点，按所选周期对日期列分组聚合；填写结束日期时，仅统计该日期及之前的列。</p>
+        </div>
+      </div>
+
+      <div class="mb-6">
+        <label class="block text-sm font-medium text-slate-700 mb-2">店铺汇总模式</label>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <label class="flex items-start gap-2 text-sm rounded-lg border border-slate-200 p-3 cursor-pointer hover:bg-slate-50">
+            <input type="radio" name="shopMode" value="separate" checked class="mt-0.5 text-emerald-600" />
+            <span>
+              <span class="font-medium text-slate-700">分别统计</span>
+              <span class="block text-xs text-slate-400 mt-1">每个店铺单独聚合，结果按店铺区分展示</span>
+            </span>
+          </label>
+          <label class="flex items-start gap-2 text-sm rounded-lg border border-slate-200 p-3 cursor-pointer hover:bg-slate-50">
+            <input type="radio" name="shopMode" value="merge" class="mt-0.5 text-emerald-600" />
+            <span>
+              <span class="font-medium text-slate-700">多店铺加和</span>
+              <span class="block text-xs text-slate-400 mt-1">将所选店铺同一统计项的数据合并求和</span>
+            </span>
+          </label>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <label id="dim1Label" class="text-sm font-medium text-slate-700">维度一（店铺）</label>
+            <div class="flex items-center gap-2">
+              <button type="button" id="selectAllDim1" class="text-xs text-emerald-600 hover:underline">全选</button>
+              <button type="button" id="deselectAllDim1" class="text-xs text-slate-500 hover:underline">取消全选</button>
+            </div>
+          </div>
+          <div id="dim1Filters" class="max-h-40 overflow-y-auto rounded-lg border border-slate-200 p-3 space-y-1 bg-slate-50"></div>
+        </div>
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <label id="dim2Label" class="text-sm font-medium text-slate-700">维度二（统计项）</label>
+            <div class="flex items-center gap-2">
+              <button type="button" id="selectAllDim2" class="text-xs text-emerald-600 hover:underline">全选</button>
+              <button type="button" id="deselectAllDim2" class="text-xs text-slate-500 hover:underline">取消全选</button>
+            </div>
+          </div>
+          <div id="dim2Filters" class="max-h-40 overflow-y-auto rounded-lg border border-slate-200 p-3 space-y-1 bg-slate-50"></div>
+        </div>
+      </div>
+
+      <button type="button" id="aggregateBtn"
+        class="mt-6 w-full md:w-auto px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg transition">
+        开始聚合
+      </button>
+    </section>
+
+    <!-- 3. 聚合文件记录 -->
+    <section id="historySection" class="hidden bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+      <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <div>
+          <h2 class="text-lg font-semibold text-slate-700">3. 聚合文件记录</h2>
+          <p class="text-xs text-slate-400 mt-1">每次聚合会生成一条记录，支持单条下载或批量选择导出。</p>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button type="button" id="selectAllReportsBtn"
+            class="px-3 py-2 text-sm border border-slate-300 rounded-lg hover:bg-slate-50">全选</button>
+          <button type="button" id="batchExportXlsxBtn"
+            class="px-3 py-2 text-sm bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg">批量导出 Excel</button>
+          <button type="button" id="batchExportCsvBtn"
+            class="px-3 py-2 text-sm bg-slate-600 hover:bg-slate-700 text-white rounded-lg">批量导出 CSV</button>
+          <button type="button" id="clearReportsBtn"
+            class="px-3 py-2 text-sm border border-red-200 text-red-600 rounded-lg hover:bg-red-50">清空记录</button>
+        </div>
+      </div>
+      <div class="overflow-x-auto rounded-lg border border-slate-200">
+        <table class="min-w-full text-sm">
+          <thead class="bg-slate-50 text-slate-700">
+            <tr>
+              <th class="px-3 py-2 w-10"><input type="checkbox" id="reportSelectAll" class="rounded text-emerald-600" /></th>
+              <th class="px-3 py-2 text-left font-semibold">生成时间</th>
+              <th class="px-3 py-2 text-left font-semibold">源文件</th>
+              <th class="px-3 py-2 text-left font-semibold">聚合配置</th>
+              <th class="px-3 py-2 text-right font-semibold">记录数</th>
+              <th class="px-3 py-2 text-right font-semibold">下载</th>
+            </tr>
+          </thead>
+          <tbody id="reportListBody" class="divide-y divide-slate-100"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const state = {
+      headers: [],
+      rows: [],
+      dateColumns: [],
+      dim1Name: "",
+      dim2Name: "",
+      dim1Values: [],
+      dim2Values: [],
+      sourceFileName: "",
+      reports: [],
+      reportSeq: 0,
+    };
+
+    const $ = (id) => document.getElementById(id);
+
+    function showAlert(message, type = "error") {
+      const box = $("alertBox");
+      box.className = "mb-4 rounded-lg border px-4 py-3 text-sm " +
+        (type === "error"
+          ? "border-red-200 bg-red-50 text-red-700"
+          : "border-emerald-200 bg-emerald-50 text-emerald-700");
+      box.textContent = message;
+      box.classList.remove("hidden");
+    }
+
+    function hideAlert() {
+      $("alertBox").classList.add("hidden");
+    }
+
+    function cellText(v) {
+      if (v == null) return "";
+      return String(v).trim();
+    }
+
+    function parseDateHeader(text, fallbackYear) {
+      const raw = cellText(text);
+      if (!raw) return null;
+
+      if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(raw)) {
+        const d = new Date(raw);
+        return Number.isNaN(d.getTime()) ? null : d;
+      }
+
+      const m1 = raw.match(/^(\d{1,2})月(\d{1,2})[号日]?$/);
+      if (m1) {
+        const d = new Date(fallbackYear, Number(m1[1]) - 1, Number(m1[2]));
+        return Number.isNaN(d.getTime()) ? null : d;
+      }
+
+      const m2 = raw.match(/^(\d{4})[\/\-年](\d{1,2})[\/\-月](\d{1,2})/);
+      if (m2) {
+        const d = new Date(Number(m2[1]), Number(m2[2]) - 1, Number(m2[3]));
+        return Number.isNaN(d.getTime()) ? null : d;
+      }
+
+      if (/^\d+(\.\d+)?$/.test(raw)) {
+        const serial = Number(raw);
+        if (serial > 30000 && serial < 60000) {
+          const parsed = XLSX.SSF.parse_date_code(serial);
+          if (parsed) return new Date(parsed.y, parsed.m - 1, parsed.d);
+        }
+      }
+
+      const d = new Date(raw);
+      return Number.isNaN(d.getTime()) ? null : d;
+    }
+
+    function formatDate(d) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      return `${y}-${m}-${day}`;
+    }
+
+    function formatDateTime(d = new Date()) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      const h = String(d.getHours()).padStart(2, "0");
+      const min = String(d.getMinutes()).padStart(2, "0");
+      const s = String(d.getSeconds()).padStart(2, "0");
+      return `${y}-${m}-${day} ${h}:${min}:${s}`;
+    }
+
+    function fileStamp(d = new Date()) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      const h = String(d.getHours()).padStart(2, "0");
+      const min = String(d.getMinutes()).padStart(2, "0");
+      const s = String(d.getSeconds()).padStart(2, "0");
+      return `${y}${m}${day}_${h}${min}${s}`;
+    }
+
+    function getPeriodLabel() {
+      return document.querySelector('input[name="period"]:checked')?.parentElement?.textContent?.trim() || "";
+    }
+
+    function getShopMode() {
+      return document.querySelector('input[name="shopMode"]:checked')?.value || "separate";
+    }
+
+    function getShopModeLabel(mode) {
+      return mode === "merge" ? "多店铺加和" : "分别统计";
+    }
+
+    function buildMergedDim1Label(selectedShops) {
+      const shops = [...selectedShops];
+      if (shops.length === 1) return shops[0];
+      return `多店铺汇总（${shops.length}店）`;
+    }
+
+    function getReportById(id) {
+      return state.reports.find((r) => r.id === id);
+    }
+
+    function buildSheetData(report) {
+      return [
+        ["生成时间", report.generatedAtText],
+        ["源文件", report.sourceFileName],
+        ["聚合配置", report.configText],
+        [],
+        ["周期", report.dim1Name, report.dim2Name, "合计值"],
+        ...report.rows.map((r) => [r.period, r.dim1, r.dim2, r.sum]),
+      ];
+    }
+
+    function downloadWorkbook(wb, filename, bookType = "xlsx") {
+      XLSX.writeFile(wb, filename, { bookType });
+    }
+
+    function exportSingleReport(report, format) {
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.aoa_to_sheet(buildSheetData(report));
+      XLSX.utils.book_append_sheet(wb, ws, "聚合结果");
+      const ext = format === "csv" ? "csv" : "xlsx";
+      downloadWorkbook(wb, `聚合结果_${fileStamp(new Date(report.generatedAt))}.${ext}`, format === "csv" ? "csv" : "xlsx");
+    }
+
+    async function exportReportsBatch(reportIds, format) {
+      const reports = reportIds.map(getReportById).filter(Boolean);
+      if (!reports.length) {
+        showAlert("请先选择要导出的聚合记录");
+        return;
+      }
+
+      if (format === "xlsx") {
+        const wb = XLSX.utils.book_new();
+        reports.forEach((report, idx) => {
+          const ws = XLSX.utils.aoa_to_sheet(buildSheetData(report));
+          const sheetName = `结果${idx + 1}_${fileStamp(new Date(report.generatedAt)).slice(-6)}`.slice(0, 31);
+          XLSX.utils.book_append_sheet(wb, ws, sheetName);
+        });
+        downloadWorkbook(wb, `聚合结果_批量_${fileStamp()}.xlsx`, "xlsx");
+        showAlert(`已批量导出 ${reports.length} 个聚合文件（Excel 多 Sheet）`, "success");
+        return;
+      }
+
+      const zip = new JSZip();
+      reports.forEach((report) => {
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.aoa_to_sheet(buildSheetData(report));
+        XLSX.utils.book_append_sheet(wb, ws, "聚合结果");
+        const csv = XLSX.write(wb, { bookType: "csv", type: "string" });
+        zip.file(`聚合结果_${fileStamp(new Date(report.generatedAt))}.csv`, csv);
+      });
+      const blob = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `聚合结果_批量_${fileStamp()}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showAlert(`已批量导出 ${reports.length} 个聚合文件（CSV 压缩包）`, "success");
+    }
+
+    function getSelectedReportIds() {
+      return [...document.querySelectorAll('input[name="reportSelect"]:checked')].map((el) => el.value);
+    }
+
+    function renderReportList() {
+      const body = $("reportListBody");
+      if (!state.reports.length) {
+        body.innerHTML = `<tr><td colspan="6" class="px-3 py-8 text-center text-slate-400">暂无聚合记录，点击「开始聚合」后会自动生成</td></tr>`;
+        $("historySection").classList.add("hidden");
+        return;
+      }
+
+      $("historySection").classList.remove("hidden");
+      body.innerHTML = state.reports.map((report) => `
+        <tr class="hover:bg-slate-50">
+          <td class="px-3 py-2 text-center">
+            <input type="checkbox" name="reportSelect" value="${report.id}" class="rounded text-emerald-600" />
+          </td>
+          <td class="px-3 py-2 whitespace-nowrap font-mono text-xs">${escapeHtml(report.generatedAtText)}</td>
+          <td class="px-3 py-2">${escapeHtml(report.sourceFileName || "-")}</td>
+          <td class="px-3 py-2 text-xs text-slate-600">${escapeHtml(report.configText)}</td>
+          <td class="px-3 py-2 text-right font-mono">${report.rows.length}</td>
+          <td class="px-3 py-2 text-right whitespace-nowrap">
+            <button type="button" data-export-xlsx="${report.id}"
+              class="px-2 py-1 text-xs bg-emerald-600 hover:bg-emerald-700 text-white rounded mr-2">下载 Excel</button>
+            <button type="button" data-export-csv="${report.id}"
+              class="px-2 py-1 text-xs bg-slate-600 hover:bg-slate-700 text-white rounded">下载 CSV</button>
+          </td>
+        </tr>
+      `).join("");
+
+      body.querySelectorAll("[data-export-xlsx]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const report = getReportById(btn.dataset.exportXlsx);
+          if (report) exportSingleReport(report, "xlsx");
+        });
+      });
+      body.querySelectorAll("[data-export-csv]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const report = getReportById(btn.dataset.exportCsv);
+          if (report) exportSingleReport(report, "csv");
+        });
+      });
+
+      $("reportSelectAll").checked = false;
+    }
+
+    function parseNumber(v) {
+      if (v == null || v === "") return 0;
+      if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+      const s = String(v).replace(/,/g, "").trim();
+      if (!s || s === "-") return 0;
+      const n = Number(s);
+      return Number.isFinite(n) ? n : NaN;
+    }
+
+    function readWorkbook(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          try {
+            const data = new Uint8Array(e.target.result);
+            const wb = XLSX.read(data, { type: "array", cellDates: true });
+            const sheetName = wb.SheetNames[0];
+            if (!sheetName) return reject(new Error("文件中没有工作表"));
+            const sheet = wb.Sheets[sheetName];
+            const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+            resolve(rows);
+          } catch (err) {
+            reject(err);
+          }
+        };
+        reader.onerror = () => reject(new Error("文件读取失败"));
+        reader.readAsArrayBuffer(file);
+      });
+    }
+
+    function inferYearFromDates(dateColumns) {
+      if (dateColumns.length === 0) return new Date().getFullYear();
+      return dateColumns[0].date.getFullYear();
+    }
+
+    function parseSheetRows(rawRows) {
+      if (!rawRows || rawRows.length < 2) {
+        throw new Error("表格数据不足，至少需要表头行和一行数据");
+      }
+
+      const headers = rawRows[0].map((h) => cellText(h));
+      if (headers.length < 3) {
+        throw new Error("表格至少需要 3 列：前两列为维度，第三列起为日期列");
+      }
+
+      const fallbackYear = new Date().getFullYear();
+      const dateColumns = [];
+      for (let i = 2; i < headers.length; i++) {
+        const date = parseDateHeader(headers[i], fallbackYear);
+        if (!date) continue;
+        dateColumns.push({ index: i, header: headers[i], date });
+      }
+
+      if (dateColumns.length === 0) {
+        throw new Error("未能识别日期列，请确认表头为「X月X号」或 YYYY-MM-DD 格式");
+      }
+
+      dateColumns.sort((a, b) => a.date - b.date);
+
+      const year = inferYearFromDates(dateColumns);
+      for (const col of dateColumns) {
+        if (!/^\d{4}/.test(cellText(col.header))) {
+          const m = cellText(col.header).match(/^(\d{1,2})月(\d{1,2})/);
+          if (m) col.date = new Date(year, Number(m[1]) - 1, Number(m[2]));
+        }
+      }
+      dateColumns.sort((a, b) => a.date - b.date);
+
+      const rows = [];
+      let lastDim1 = "";
+      let lastDim2 = "";
+      for (let r = 1; r < rawRows.length; r++) {
+        const row = rawRows[r];
+        if (!row || row.every((c) => cellText(c) === "")) continue;
+        let dim1 = cellText(row[0]);
+        let dim2 = cellText(row[1]);
+        if (dim1) lastDim1 = dim1;
+        else dim1 = lastDim1;
+        if (dim2) lastDim2 = dim2;
+        else dim2 = lastDim2;
+        if (!dim1 && !dim2) continue;
+        rows.push({ dim1, dim2, values: row });
+      }
+
+      if (rows.length === 0) {
+        throw new Error("未读取到有效数据行");
+      }
+
+      return {
+        headers,
+        rows,
+        dateColumns,
+        dim1Name: headers[0] || "维度一",
+        dim2Name: headers[1] || "维度二",
+        dim1Values: [...new Set(rows.map((r) => r.dim1))].filter(Boolean),
+        dim2Values: [...new Set(rows.map((r) => r.dim2))].filter(Boolean),
+      };
+    }
+
+    function renderCheckboxFilters(containerId, values, name) {
+      const container = $(containerId);
+      container._filterValues = values;
+      container.innerHTML = values.map((v, idx) => `
+        <label class="flex items-center gap-2 text-sm">
+          <input type="checkbox" name="${name}" data-idx="${idx}" checked class="rounded text-emerald-600" />
+          <span class="truncate" title="${escapeHtml(v)}">${escapeHtml(v)}</span>
+        </label>
+      `).join("");
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function getFilterContainer(name) {
+      return name === "dim1" ? $("dim1Filters") : $("dim2Filters");
+    }
+
+    function getCheckedValues(name) {
+      const values = getFilterContainer(name)._filterValues || [];
+      return [...document.querySelectorAll(`input[name="${name}"]:checked`)]
+        .map((el) => values[Number(el.dataset.idx)])
+        .filter((v) => v != null && v !== "");
+    }
+
+    function setAllChecked(name, checked) {
+      document.querySelectorAll(`input[name="${name}"]`).forEach((el) => { el.checked = checked; });
+    }
+
+    function daysBetween(a, b) {
+      const ms = 24 * 60 * 60 * 1000;
+      const utcA = Date.UTC(a.getFullYear(), a.getMonth(), a.getDate());
+      const utcB = Date.UTC(b.getFullYear(), b.getMonth(), b.getDate());
+      return Math.floor((utcA - utcB) / ms);
+    }
+
+    function getPeriodIndex(date, startDate, periodDays) {
+      const diff = daysBetween(date, startDate);
+      if (diff < 0) return null;
+      return Math.floor(diff / periodDays);
+    }
+
+    function buildPeriodLabel(startDate, periodDays, index) {
+      const start = new Date(startDate.getTime());
+      start.setDate(start.getDate() + index * periodDays);
+      const end = new Date(start.getTime());
+      end.setDate(end.getDate() + periodDays - 1);
+      return `${formatDate(start)} ~ ${formatDate(end)}`;
+    }
+
+    function parseStartDate(value) {
+      const parts = value.split("-").map(Number);
+      if (parts.length !== 3 || parts.some(Number.isNaN)) return null;
+      return new Date(parts[0], parts[1] - 1, parts[2]);
+    }
+
+    function resolveDateColumnsForStart(startDate) {
+      const baseYear = startDate.getFullYear();
+      return state.dateColumns.map((col) => {
+        const header = cellText(col.header);
+        if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(header)) {
+          const d = parseStartDate(header);
+          return d ? { ...col, date: d } : col;
+        }
+        const m = header.match(/^(\d{1,2})月(\d{1,2})/);
+        if (m) {
+          let year = baseYear;
+          const month = Number(m[1]);
+          const day = Number(m[2]);
+          const startMonth = startDate.getMonth() + 1;
+          if (month < startMonth - 6) year += 1;
+          if (month > startMonth + 6) year -= 1;
+          return { ...col, date: new Date(year, month - 1, day) };
+        }
+        return col;
+      });
+    }
+
+    function aggregateData() {
+      hideAlert();
+
+      const periodDays = Number(document.querySelector('input[name="period"]:checked')?.value || 7);
+      const startDateStr = $("startDate").value;
+      if (!startDateStr) {
+        showAlert("请选择统计起始日期");
+        return;
+      }
+      const startDate = parseStartDate(startDateStr);
+      if (!startDate || Number.isNaN(startDate.getTime())) {
+        showAlert("起始日期无效");
+        return;
+      }
+
+      const endDateStr = $("endDate").value;
+      let endDate = null;
+      if (endDateStr) {
+        endDate = parseStartDate(endDateStr);
+        if (!endDate || Number.isNaN(endDate.getTime())) {
+          showAlert("结束日期无效");
+          return;
+        }
+        if (daysBetween(endDate, startDate) < 0) {
+          showAlert("结束日期不能早于起始日期");
+          return;
+        }
+      }
+
+      const selectedDim1 = new Set(getCheckedValues("dim1"));
+      const selectedDim2 = new Set(getCheckedValues("dim2"));
+      if (selectedDim1.size === 0 || selectedDim2.size === 0) {
+        showAlert("请至少各选择一个维度筛选项");
+        return;
+      }
+
+      const shopMode = getShopMode();
+      const mergedDim1Label = buildMergedDim1Label(selectedDim1);
+      const activeDateColumns = resolveDateColumnsForStart(startDate);
+      const periodMap = new Map();
+      const invalidCells = [];
+
+      for (const row of state.rows) {
+        if (!selectedDim1.has(row.dim1) || !selectedDim2.has(row.dim2)) continue;
+
+        for (const col of activeDateColumns) {
+          if (endDate && daysBetween(col.date, endDate) > 0) continue;
+          const idx = getPeriodIndex(col.date, startDate, periodDays);
+          if (idx == null) continue;
+
+          const num = parseNumber(row.values[col.index]);
+          if (Number.isNaN(num)) {
+            invalidCells.push(`${row.dim1} / ${row.dim2} / ${col.header}`);
+            continue;
+          }
+
+          const dim1 = shopMode === "merge" ? mergedDim1Label : row.dim1;
+          const key = shopMode === "merge"
+            ? `${idx}||${row.dim2}`
+            : `${idx}||${row.dim1}||${row.dim2}`;
+          if (!periodMap.has(key)) {
+            periodMap.set(key, {
+              periodIndex: idx,
+              period: buildPeriodLabel(startDate, periodDays, idx),
+              dim1,
+              dim2: row.dim2,
+              sum: 0,
+            });
+          }
+          periodMap.get(key).sum += num;
+        }
+      }
+
+      const result = [...periodMap.values()].sort((a, b) => {
+        if (a.periodIndex !== b.periodIndex) return a.periodIndex - b.periodIndex;
+        if (a.dim1 !== b.dim1) return a.dim1.localeCompare(b.dim1, "zh-CN");
+        return a.dim2.localeCompare(b.dim2, "zh-CN");
+      });
+
+      if (result.length === 0) {
+        showAlert("没有符合筛选和日期范围的数据，请检查起始日期或筛选项");
+        return;
+      }
+
+      const generatedAt = new Date();
+      const periodLabelText = getPeriodLabel();
+      const shopModeLabel = getShopModeLabel(shopMode);
+      let configText = `${periodLabelText}，${shopModeLabel}，起始 ${startDateStr}`;
+      if (endDateStr) configText += `，结束 ${endDateStr}`;
+      if (shopMode === "merge" && selectedDim1.size > 1) {
+        configText += `，含 ${selectedDim1.size} 个店铺`;
+      }
+      const report = {
+        id: `report-${++state.reportSeq}`,
+        generatedAt: generatedAt.toISOString(),
+        generatedAtText: formatDateTime(generatedAt),
+        sourceFileName: state.sourceFileName,
+        periodLabel: periodLabelText,
+        shopMode,
+        shopModeLabel,
+        startDate: startDateStr,
+        endDate: endDateStr || "",
+        configText,
+        dim1Name: state.dim1Name,
+        dim2Name: state.dim2Name,
+        rows: result,
+      };
+
+      state.reports.unshift(report);
+      renderReportList();
+      const msg = invalidCells.length
+        ? `聚合完成，共 ${result.length} 条记录（${invalidCells.length} 个非数值单元格已跳过），已加入聚合文件记录`
+        : `聚合完成，共 ${result.length} 条记录，已加入聚合文件记录`;
+      showAlert(msg, "success");
+    }
+
+    function formatNumber(n) {
+      if (Number.isInteger(n)) return String(n);
+      return n.toFixed(2).replace(/\.?0+$/, "");
+    }
+
+    async function handleFile(file) {
+      hideAlert();
+
+      if (!file) return;
+
+      const ext = file.name.split(".").pop()?.toLowerCase();
+      if (!["xlsx", "xls", "csv"].includes(ext)) {
+        showAlert("仅支持 .xlsx / .csv 格式");
+        return;
+      }
+
+      try {
+        const rawRows = await readWorkbook(file);
+        const parsed = parseSheetRows(rawRows);
+
+        Object.assign(state, parsed);
+        state.sourceFileName = file.name;
+
+        $("fileMeta").innerHTML =
+          `已加载：<b>${escapeHtml(file.name)}</b>，` +
+          `数据行 ${parsed.rows.length}，日期列 ${parsed.dateColumns.length} 个，` +
+          `维度列「${escapeHtml(parsed.dim1Name)}」「${escapeHtml(parsed.dim2Name)}」`;
+
+        $("dim1Label").textContent = parsed.dim1Name;
+        $("dim2Label").textContent = parsed.dim2Name;
+        renderCheckboxFilters("dim1Filters", parsed.dim1Values, "dim1");
+        renderCheckboxFilters("dim2Filters", parsed.dim2Values, "dim2");
+
+        if (parsed.dateColumns.length > 0) {
+          $("startDate").value = formatDate(parsed.dateColumns[0].date);
+        }
+        $("endDate").value = "";
+
+        $("configSection").classList.remove("hidden");
+        showAlert("文件解析成功，请配置聚合参数后点击「开始聚合」", "success");
+      } catch (err) {
+        showAlert(err.message || "文件解析失败");
+        $("configSection").classList.add("hidden");
+        $("fileMeta").textContent = "";
+      }
+    }
+
+    $("fileInput").addEventListener("change", (e) => {
+      handleFile(e.target.files[0]);
+    });
+
+    $("aggregateBtn").addEventListener("click", aggregateData);
+    $("selectAllDim1").addEventListener("click", () => setAllChecked("dim1", true));
+    $("deselectAllDim1").addEventListener("click", () => setAllChecked("dim1", false));
+    $("selectAllDim2").addEventListener("click", () => setAllChecked("dim2", true));
+    $("deselectAllDim2").addEventListener("click", () => setAllChecked("dim2", false));
+    $("reportSelectAll").addEventListener("change", (e) => {
+      document.querySelectorAll('input[name="reportSelect"]').forEach((el) => {
+        el.checked = e.target.checked;
+      });
+    });
+    $("selectAllReportsBtn").addEventListener("click", () => {
+      document.querySelectorAll('input[name="reportSelect"]').forEach((el) => { el.checked = true; });
+      $("reportSelectAll").checked = true;
+    });
+    $("batchExportXlsxBtn").addEventListener("click", () => exportReportsBatch(getSelectedReportIds(), "xlsx"));
+    $("batchExportCsvBtn").addEventListener("click", () => exportReportsBatch(getSelectedReportIds(), "csv"));
+    $("clearReportsBtn").addEventListener("click", () => {
+      if (!state.reports.length) return;
+      if (!confirm("确定清空所有聚合记录吗？")) return;
+      state.reports = [];
+      renderReportList();
+      showAlert("已清空聚合记录", "success");
+    });
+  </script>
+</body>
+</html>

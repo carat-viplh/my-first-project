@@ -28,6 +28,16 @@ npm start
 | 批量遍历 | 在子文件中查找模板「旧内容」，输出行号与新旧文本 |
 | 自动修改 | txt 按行替换；docx 在 document.xml 中替换；pdf 仅对比 |
 
+## 部署到 Vercel（Serverless）
+
+本项目为 Express 单应用，已通过 `api/index.js` 作为无服务器入口，并由 `vercel.json` 将全部请求重写至该函数。
+
+1. 连接 GitHub 仓库并导入项目，**根目录**指向本仓库。
+2. 使用默认 **Node 18+**；框架选 Other / 留空即可。
+3. **说明**：Vercel 上上传目录使用 `/tmp`，实例间不共享、冷启动后临时文件会清空；适合对比与短时会话。长时间或大文件生产环境建议使用 VPS / Docker 跑 `npm start`。
+
+本地与常见问题：若在 Serverless 中出现 500，请先在 Vercel 项目 **Functions → Logs** 查看具体报错（多为旧部署调用了 `listen`、或写入了非 `/tmp` 目录）。
+
 ## 技术栈
 
 - 前端：HTML + Tailwind CSS + 原生 JavaScript
